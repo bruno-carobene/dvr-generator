@@ -480,11 +480,11 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                 
                 # Istruzioni sommario
                 st.info("""
-                📋 **Aggiornare il sommario:**  
-                Dopo aver aperto il documento in Word:
-                1. Seleziona tutto (**Ctrl+A**)
-                2. Premi **F9** (o clicca sul sommario → tasto destro → "Aggiorna campo")
-                3. Scegli "Aggiorna intero sommario"
+                📋 **Il vostro documento:**  
+                Potete ora scaricare il file docx che è stato generato.
+                1. Leggetelo con attenzione
+                2. E' un file editabile e può essere corretto
+                3. Il documento deve essere stampato e firmato dai referenti.
                 """)
                 
                 # Riepilogo
@@ -497,6 +497,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
