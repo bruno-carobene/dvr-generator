@@ -1,21 +1,23 @@
 # document_generator.py
 from datetime import datetime
 from docx import Document
-from docx.shared import RGBColor, Pt
-from docx.oxml.ns import qn, nsmap
+from docx.shared import RGBColor
+from docx.oxml.ns import qn
 from docx.oxml import parse_xml
-from copy import deepcopy
 import os
-import re
+import sys
 
-# Namespace per i campi Word
-NAMESPACES = {
-    'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
-    'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
-    'w15': 'http://schemas.microsoft.com/office/word/2012/wordml'
-}
+# Fix per docxcompose su Python 3.13
+try:
+    from docxcompose.composer import Composer
+except ImportError as e:
+    print(f"Errore importazione Composer: {e}")
+    # Fallback: installazione runtime se necessario
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "docxcompose==1.1.2"])
+    from docxcompose.composer import Composer
 
-# Database agenti chimici
+# Database agenti chimici (tuo codice originale)
 db_chimico = {
     "Acidi per laboratori didattici": ["2-Medio", "H314"], 
     "Acido cloridrico": ["2-Medio", "H315 - H335"],
@@ -58,7 +60,7 @@ db_chimico = {
     "Gasolio": ["1-Basso", "H226, H304, H332, H351, H411"], 
     "Glicole etilenico": ["1-Basso", "H302"],
     "Grasso lubrificante": ["1-Basso", "-"], 
-    "Inchiostri per offset": ["2-Medio", "H315, H318, "],
+    "Inchiostri per offset": ["2-Medio", "H315, H318, H412"],
     "Indurente vernici veicoli": ["2-Medio", "H226, H332, H317, H360, H412"], 
     "Legante basi verniciatura": ["2-Medio", "-"],
     "Loctite-401": ["1-Basso", "H315, H319, H335"], 
@@ -205,34 +207,9 @@ def formatta_per_word(lista):
     voci_pulite = [v.replace("_", " ").capitalize() for v in lista]
     return "\n".join([f"- {v}" for v in voci_pulite])
 
-def copia_elementi(src_doc, dest_doc):
-    """Copia tutti gli elementi da un documento all'altro"""
-    for element in src_doc.element.body:
-        dest_doc.element.body.append(deepcopy(element))
-
-def aggiorna_campi_sommario(doc):
-    """
-    Aggiorna i campi del sommario (TOC) impostandoli come 'dirty' 
-    per forzare l'aggiornamento all'apertura in Word
-    """
-    # Trova tutti i campi nel documento
-    for para in doc.paragraphs:
-        for run in para.runs:
-            # Cerca i campi TOC (sommario)
-            if run._element.xpath('.//w:fldChar'):
-                # Imposta il campo come da aggiornare
-                fldChars = run._element.findall('.//w:fldChar', NAMESPACES)
-                for fldChar in fldChars:
-                    if fldChar.get(qn('w:fldCharType')) == 'separate':
-                        # Trova il campo padre e imposta dirty
-                        fldData = run._element.find('.//w:instrText', NAMESPACES)
-                        if fldData is not None and 'TOC' in (fldData.text or ''):
-                            # Imposta il flag dirty
-                            fldChar.set(qn('w:dirty'), 'true')
-
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
-    Funzione principale che genera il documento DVR
+    Funzione principale che genera il documento DVR usando docxcompose
     """
     # Prepara i dati
     data_di_oggi = datetime.now().strftime("%d/%m/%Y")
@@ -259,18 +236,18 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 3. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
-    # 4. Assembla moduli
+    # 4. Assembla moduli con Composer (metodo sicuro)
     print("Assemblaggio moduli in corso...")
+    composer = Composer(master_doc)
     
     # Aggiungi moduli ambienti
     for ambiente in ambienti:
         mod_path = os.path.join(templates_dir, f"{ambiente}.docx")
         if os.path.exists(mod_path):
             try:
-                mod_doc = Document(mod_path)
-                master_doc.add_page_break()
-                copia_elementi(mod_doc, master_doc)
-                print(f"  ✓ Aggiunto: {ambiente}")
+                doc = Document(mod_path)
+                composer.append(doc)
+                print(f"  ✓ Aggiunto ambiente: {ambiente}")
             except Exception as e:
                 print(f"  ✗ Errore con {ambiente}: {e}")
     
@@ -279,10 +256,9 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
         mod_path = os.path.join(templates_dir, f"{att}.docx")
         if os.path.exists(mod_path):
             try:
-                mod_doc = Document(mod_path)
-                master_doc.add_page_break()
-                copia_elementi(mod_doc, master_doc)
-                print(f"  ✓ Aggiunto: {att}")
+                doc = Document(mod_path)
+                composer.append(doc)
+                print(f"  ✓ Aggiunta attrezzatura: {att}")
             except Exception as e:
                 print(f"  ✗ Errore con {att}: {e}")
     
@@ -291,24 +267,16 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
         mod_path = os.path.join(templates_dir, f"{mans}.docx")
         if os.path.exists(mod_path):
             try:
-                mod_doc = Document(mod_path)
-                master_doc.add_page_break()
-                copia_elementi(mod_doc, master_doc)
-                print(f"  ✓ Aggiunto: {mans}")
+                doc = Document(mod_path)
+                composer.append(doc)
+                print(f"  ✓ Aggiunta mansione: {mans}")
             except Exception as e:
                 print(f"  ✗ Errore con {mans}: {e}")
     
-    # 5. Aggiorna campi sommario
-    try:
-        aggiorna_campi_sommario(master_doc)
-        print("  ✓ Campi sommario aggiornati")
-    except Exception as e:
-        print(f"  ⚠️  Avviso: impossibile aggiornare sommario automaticamente: {e}")
-    
-    # 6. Salva in memoria (bytes)
+    # 5. Salva in memoria (bytes)
     from io import BytesIO
     buffer = BytesIO()
-    master_doc.save(buffer)
+    composer.save(buffer)
     buffer.seek(0)
     
     return buffer
