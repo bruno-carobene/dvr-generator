@@ -84,9 +84,9 @@ with st.sidebar:
         
         /* Sidebar aperta (desktop) - REGOLA QUESTO VALORE */
         [data-testid="stSidebar"][aria-expanded="true"] {
-            width: 120px !important;
-            min-width: 120px !important;
-            max-width: 120px !important;
+            width: 130px !important;
+            min-width: 130px !important;
+            max-width: 130px !important;
         }
         
         /* Contenuto interno sidebar */
@@ -497,6 +497,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
