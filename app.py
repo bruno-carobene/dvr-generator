@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📋 Generatore Documento di Valutazione Rischi (DVR)")
+st.title("📋 Generatore Documento di Valutazione Rischi (DVR) di Easywork Italia S.r.l.")
 st.markdown("Compila il modulo per generare il documento di valutazione rischi personalizzato.")
 
 # Inizializza session state per i dati
@@ -396,3 +396,4 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
 
                 st.exception(e)
+
