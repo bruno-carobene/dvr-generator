@@ -76,22 +76,27 @@ with st.sidebar:
     # RESTRINGI sidebar al minimo
     st.markdown("""
         <style>
-        [data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
-            width: 120px;  /* Ridotto da 180px a 120px */
+        /* Sidebar chiusa (mobile) */
+        [data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
         }
-        [data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
-            width: 120px;
+        
+        /* Sidebar aperta (desktop) - REGOLA QUESTO VALORE */
+        [data-testid="stSidebar"][aria-expanded="true"] {
+            width: 120px !important;
+            min-width: 120px !important;
+            max-width: 120px !important;
         }
-        /* Rimuovi padding interno per avvicinare al bordo */
-        [data-testid="stSidebar"] > div:first-child > div:first-child {
-            padding-left: 0.5rem;
-            padding-right: 0.5rem;
+        
+        /* Contenuto interno sidebar */
+        [data-testid="stSidebar"][aria-expanded="true"] > div {
+            width: 120px !important;
         }
-        /* Riduci larghezza pulsante */
-        .stButton > button {
-            width: 100%;
-            padding: 0.25rem 0.5rem;
-            font-size: 0.8rem;
+        
+        /* Rimuovi padding eccessivo */
+        .css-1d391kg, .css-1lcbmhc {
+            padding: 0.5rem !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -492,6 +497,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
