@@ -4,7 +4,7 @@ from docx import Document
 from docx.shared import RGBColor, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.oxml import parse_xml
+from docx.oxml import parse_xml, OxmlElement
 import os
 
 # Database agenti chimici
@@ -70,7 +70,7 @@ db_chimico = {
     "Sepiolite": ["2-Medio", "H318, H302, H315"], 
     "Silicone spray": ["2-Medio", "H222, H315, H336, H411"],
     "Soluzione disinfettante": ["1-Basso", "H302, H318, H319, H336"], 
-    "Solventi": ["3-Alto", "H304, H336"],
+    "Solventi": ["3-Alto", "H304, "],
     "Tinta per capelli": ["2-Medio", "n.a."], 
     "Toner": ["1-Basso", "-"],
     "Total clean": ["1-Basso", "H319"], 
@@ -78,43 +78,6 @@ db_chimico = {
     "Vernice spray": ["2-Medio", "H222, H319, H336, H411"], 
     "Vernici per offset": ["2-Medio", "H301, H314, H317, H411"]
 }
-
-# Testo del sommario statico (dal tuo file)
-SOMMARIO_STATICO = """SOMMARIO
-
-Introduzione
-Obiettivi del documento
-Chi ha partecipato alla redazione del documento
-Procedura di identificazione e analisi dei rischi e definizione dei controlli
-    Identificazione dei centri/fonti di pericolo per la sicurezza e la salute dei lavoratori
-    Identificazione dei lavoratori (o di terzi) esposti a rischi potenziali
-    Valutazione dei rischi, dal punto di vista qualitativo e quantitativo
-    Studio sulla possibilità di eliminare i rischi
-    Programma delle misure ritenute opportune per garantire il miglioramento nel tempo dei livelli di sicurezza e procedura per l'attuazione
-Elenco dei pericoli considerati
-Criteri di quantificazione del rischio
-    Probabilità
-    Danno
-    Rischio
-    Quantificazione dei rischi specifici
-Prescrizioni legali
-Gestione del documento
-
-L'azienda
-Anagrafica aziendale
-Il Sistema di sicurezza aziendale
-Descrizione strutturale della sede di lavoro
-    Descrizione generale dei locali
-    Attività affidate a terzi
-    Attività svolte presso terzi
-Attrezzature e agenti chimici impiegati
-Elenco delle attrezzature impiegate
-Agenti chimici
-
-Allegati
-Ambienti di lavoro
-Attrezzature
-Mansioni"""
 
 def imposta_colore_cella(cella, colore_hex):
     """Imposta colore di sfondo cella"""
@@ -213,83 +176,174 @@ def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
             p._element.addnext(table._element)
 
 def rimuovi_sommario_dinamico(doc):
-    """Rimuove il campo sommario (TOC) dal documento"""
-    # Cerca e rimuove i campi TOC
-    for p in doc.paragraphs[:]:  # Copia la lista per poter rimuovere
-        # Cerca il campo TOC (ha caratteri speciali)
-        if 'TOC' in p.text or 'SOMMARIO' in p.text.upper():
-            # Verifica se è un campo dinamico (ha fldChar)
-            if p._element.xpath('.//w:fldChar'):
-                p.text = ""  # Svuota il paragrafo
-                continue
+    """Rimuove il campo sommario (TOC) e il paragrafo 'Nessuna voce di sommario trovata'"""
+    paragrafi_da_rimuovere = []
+    
+    for i, p in enumerate(doc.paragraphs):
+        # Cerca campi TOC
+        if p._element.xpath('.//w:fldChar'):
+            paragrafi_da_rimuovere.append(i)
+            continue
         
-        # Rimuove anche "Nessuna voce di sommario trovata"
-        if 'Nessuna voce di sommario trovata' in p.text:
-            p.text = ""
+        # Rimuove "Nessuna voce di sommario trovata" o simili
+        if any(testo in p.text for testo in [
+            'Nessuna voce di sommario trovata',
+            'Aggiorna sommario',
+            'interruzione pagina',
+            'SOMMARIO'
+        ]):
+            paragrafi_da_rimuovere.append(i)
+            continue
+    
+    # Rimuovi dal fondo per non cambiare gli indici
+    for i in reversed(paragrafi_da_rimuovere):
+        if i < len(doc.paragraphs):
+            p = doc.paragraphs[i]
+            p._element.getparent().remove(p._element)
 
 def aggiungi_sommario_statico(doc):
-    """Aggiunge il sommario statico a pagina 2"""
-    # Trova l'elemento dopo la prima pagina (dopo un salto pagina o alla fine della prima sezione)
-    # Inseriamo dopo il primo paragrafo che troviamo con "Documento di Valutazione" o simile
+    """Aggiunge il sommario statico DOPO la prima pagina (senza forzare salto pagina extra)"""
     
+    # Trova dove finisce la prima pagina (dopo il titolo principale)
     target_para = None
     for i, p in enumerate(doc.paragraphs):
-        if 'DOCUMENTO' in p.text.upper() or 'VALUTAZIONE' in p.text.upper():
-            # Cerca il prossimo salto pagina o fine sezione
-            target_para = p
+        if 'VALUTAZIONE DEI RISCHI' in p.text.upper() or 'DOCUMENTO DI VALUTAZIONE' in p.text.upper():
+            # Cerca il paragrafo successivo che potrebbe essere un salto pagina o la fine
+            if i + 1 < len(doc.paragraphs):
+                next_p = doc.paragraphs[i + 1]
+                # Se c'è già un salto pagina, usiamo quello
+                if next_p._element.xpath('.//w:br[@w:type="page"]'):
+                    target_para = next_p
+                else:
+                    target_para = p
+            else:
+                target_para = p
             break
     
     if target_para is None:
-        # Se non troviamo il target, inseriamo dopo il primo paragrafo
         target_para = doc.paragraphs[0] if doc.paragraphs else None
     
-    if target_para:
-        # Aggiungi salto pagina
-        target_para._element.addnext(parse_xml(r'<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:br w:type="page"/></w:r></w:p>'))
+    if target_para is None:
+        return
+    
+    # Inserisci SOMMARIO come titolo
+    p_titolo = doc.add_paragraph()
+    target_para._element.addnext(p_titolo._element)
+    run = p_titolo.add_run("SOMMARIO")
+    run.bold = True
+    run.font.size = Pt(16)
+    p_titolo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Inserisci righe del sommario
+    sommario_righe = [
+        ("Introduzione", 0),
+        ("Obiettivi del documento", 1),
+        ("Chi ha partecipato alla redazione del documento", 1),
+        ("Procedura di identificazione e analisi dei rischi e definizione dei controlli", 0),
+        ("Identificazione dei centri/fonti di pericolo per la sicurezza e la salute dei lavoratori", 1),
+        ("Identificazione dei lavoratori (o di terzi) esposti a rischi potenziali", 1),
+        ("Valutazione dei rischi, dal punto di vista qualitativo e quantitativo", 1),
+        ("Studio sulla possibilità di eliminare i rischi", 1),
+        ("Programma delle misure ritenute opportune per garantire il miglioramento nel tempo dei livelli di sicurezza e procedura per l'attuazione", 1),
+        ("Elenco dei pericoli considerati", 0),
+        ("Criteri di quantificazione del rischio", 0),
+        ("Probabilità", 1),
+        ("Danno", 1),
+        ("Rischio", 1),
+        ("Quantificazione dei rischi specifici", 1),
+        ("Prescrizioni legali", 0),
+        ("Gestione del documento", 0),
+        ("", 0),  # Riga vuota
+        ("L'azienda", 0),
+        ("Anagrafica aziendale", 1),
+        ("Il Sistema di sicurezza aziendale", 1),
+        ("Descrizione strutturale della sede di lavoro", 1),
+        ("Descrizione generale dei locali", 2),
+        ("Attività affidate a terzi", 2),
+        ("Attività svolte presso terzi", 2),
+        ("Attrezzature e agenti chimici impiegati", 0),
+        ("Elenco delle attrezzature impiegate", 1),
+        ("Agenti chimici", 1),
+        ("", 0),  # Riga vuota
+        ("Allegati", 0),
+        ("Ambienti di lavoro", 1),
+        ("Attrezzature", 1),
+        ("Mansioni", 1),
+    ]
+    
+    ultimo_para = p_titolo
+    for testo, livello in sommario_righe:
+        if not testo:
+            # Riga vuota
+            p = doc.add_paragraph()
+        else:
+            p = doc.add_paragraph()
+            run = p.add_run(testo)
+            if livello == 0:
+                run.bold = True
+                run.font.size = Pt(11)
+            elif livello == 1:
+                run.font.size = Pt(10)
+            else:  # livello 2
+                run.font.size = Pt(10)
+                p.paragraph_format.left_indent = Pt(36)
         
-        # Aggiungi titolo SOMMARIO
-        p_sommario = doc.add_paragraph()
-        p_sommario._element.getprevious().addnext(p_sommario._element)
-        run = p_sommario.add_run("SOMMARIO")
-        run.bold = True
-        run.font.size = Pt(16)
-        p_sommario.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Aggiungi righe del sommario
-        righe = SOMMARIO_STATICO.split('\n')
-        for riga in righe[1:]:  # Salta il primo "SOMMARIO"
-            if riga.strip():
-                p = doc.add_paragraph()
-                p_sommario._element.addnext(p._element)
-                p_sommario = p  # Aggiorna riferimento per il prossimo
-                
-                # Gestione indentazione
-                if riga.startswith('    ') or riga.startswith('\t'):
-                    # Sotto-sezione (indentata)
-                    p.paragraph_format.left_indent = Pt(36)
-                    run = p.add_run(riga.strip())
-                    run.font.size = Pt(10)
-                else:
-                    # Sezione principale
-                    run = p.add_run(riga.strip())
-                    run.bold = True
-                    run.font.size = Pt(11)
+        ultimo_para._element.addnext(p._element)
+        ultimo_para = p
 
-def formatta_elenco_bullettato(lista):
-    """Formatta elenco con bullet e a capo, senza trattini"""
+def formatta_elenco_paragrafi(lista):
+    """
+    Formatta elenco con VERO a capo (paragrafo), non interruzione riga.
+    Ogni elemento è un paragrafo separato.
+    """
     if not lista:
         return ""
     
     # Formatta nomi
     voci_pulite = [v.replace("_", " ").capitalize() for v in lista]
     
-    # Unisci con a capo (senza trattini iniziali, solo bullet verranno aggiunti dal template)
-    return "\n".join(voci_pulite)
+    # Unisci con carattere speciale che indica "nuovo paragrafo"
+    # Useremo chr(13) o semplicemente faremo gestire questo a chi chiama la funzione
+    return voci_pulite  # Restituisce lista, non stringa
 
-def copia_elementi_sicuro(src_doc, dest_doc):
-    """Copia elementi da un documento all'altro in modo sicuro"""
-    for element in src_doc.element.body:
-        dest_doc.element.body.append(element)
+def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
+    """
+    Sostituisce il segnaposto con un elenco puntato dove ogni voce è un paragrafo separato
+    """
+    if not lista_voci:
+        return
+    
+    for p in doc.paragraphs:
+        if segnaposto in p.text:
+            # Trova il paragrafo padre
+            parent = p._element.getparent()
+            idx = parent.index(p._element)
+            
+            # Rimuovi il placeholder ma mantieni il paragrafo per il primo elemento
+            p.text = p.text.replace(segnaposto, "")
+            
+            # Inserisci ogni voce come nuovo paragrafo con bullet
+            for i, voce in enumerate(lista_voci):
+                if i == 0:
+                    # Primo elemento: usa il paragrafo esistente
+                    p.text = voce
+                    # Applica stile elenco puntato se disponibile
+                    try:
+                        p.style = 'List Bullet'
+                    except:
+                        pass
+                else:
+                    # Elementi successivi: nuovi paragrafi
+                    new_p = OxmlElement('w:p')
+                    parent.insert(idx + i, new_p)
+                    # Aggiungi testo
+                    r = OxmlElement('w:r')
+                    t = OxmlElement('w:t')
+                    t.text = voce
+                    r.append(t)
+                    new_p.append(r)
+            
+            break
 
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
@@ -299,11 +353,17 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     data_di_oggi = datetime.now().strftime("%d/%m/%Y")
     azienda_data["DATA"] = data_di_oggi
     
-    # Formatta le liste CON a capo (per elenchi puntati)
-    azienda_data["LISTA_AMBIENTI"] = formatta_elenco_bullettato(ambienti)
-    azienda_data["LISTA_MANSIONI"] = formatta_elenco_bullettato(mansioni)
-    azienda_data["LISTA_ATTREZZATURE"] = formatta_elenco_bullettato(attrezzature)
-    azienda_data["LISTA_CHIMICI"] = formatta_elenco_bullettato(agenti_chimici)
+    # Formatta le liste (ora come liste, non stringhe)
+    lista_ambienti = formatta_elenco_paragrafi(ambienti)
+    lista_mansioni = formatta_elenco_paragrafi(mansioni)
+    lista_attrezzature = formatta_elenco_paragrafi(attrezzature)
+    lista_chimici = formatta_elenco_paragrafi(agenti_chimici)
+    
+    # Per compatibilità con segnaposto singolo, unisci con "a capo" (chr(13))
+    azienda_data["LISTA_AMBIENTI"] = chr(13).join(lista_ambienti) if lista_ambienti else ""
+    azienda_data["LISTA_MANSIONI"] = chr(13).join(lista_mansioni) if lista_mansioni else ""
+    azienda_data["LISTA_ATTREZZATURE"] = chr(13).join(lista_attrezzature) if lista_attrezzature else ""
+    azienda_data["LISTA_CHIMICI"] = chr(13).join(lista_chimici) if lista_chimici else ""
     
     # Percorso template
     template_path = os.path.join(templates_dir, 'Template_Base.docx')
@@ -314,24 +374,38 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 1. Carica template master
     master_doc = Document(template_path)
     
-    # 2. Rimuovi sommario dinamico esistente
+    # 2. Rimuovi sommario dinamico esistente (COMPLETAMENTE)
     rimuovi_sommario_dinamico(master_doc)
     
-    # 3. Aggiungi sommario statico
-    aggiungi_sommario_statico(master_doc)
-    
-    # 4. Compila segnaposti anagrafici (mantenendo formattazione)
+    # 3. Compila segnaposti anagrafici (mantenendo formattazione)
     compila_segnaposto(master_doc, azienda_data)
+    
+    # 4. Inserisci elenchi puntati corretti (dopo aver compilato i segnaposto)
+    # Questo sovrascrive le liste se il template ha i segnaposto in stili elenco
+    inserisci_elenco_puntato(master_doc, "{{LISTA_ATTREZZATURE}}", lista_attrezzature)
+    inserisci_elenco_puntato(master_doc, "{{LISTA_CHIMICI}}", lista_chimici)
     
     # 5. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
-    # 6. Assembla moduli (metodo sicuro senza docxcompose)
+    # 6. Aggiungi sommario statico (DOPO la compilazione, prima dei moduli)
+    aggiungi_sommario_statico(master_doc)
+    
+    # 7. Assembla moduli
     print("Assemblaggio moduli in corso...")
     
-    # Raccogli tutti i moduli da aggiungere
-    moduli_da_aggiungere = []
+    # Trova dove inserire i moduli (dopo "Allegati" o alla fine)
+    insert_point = None
+    for i, p in enumerate(master_doc.paragraphs):
+        if 'ALLEGATI' in p.text.upper():
+            insert_point = p
+            break
     
+    if insert_point is None:
+        insert_point = master_doc.paragraphs[-1] if master_doc.paragraphs else None
+    
+    # Aggiungi moduli
+    moduli_da_aggiungere = []
     for ambiente in ambienti:
         mod_path = os.path.join(templates_dir, f"{ambiente}.docx")
         if os.path.exists(mod_path):
@@ -347,23 +421,25 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
         if os.path.exists(mod_path):
             moduli_da_aggiungere.append(("mansione", mans, mod_path))
     
-    # Aggiungi moduli uno per uno
+    # Inserisci moduli
     for tipo, nome, mod_path in moduli_da_aggiungere:
         try:
             mod_doc = Document(mod_path)
+            
             # Aggiungi salto pagina
-            master_doc.add_page_break()
-            # Copia paragrafi uno per uno (più sicuro)
+            if insert_point:
+                master_doc.add_page_break()
+            
+            # Copia contenuto
             for para in mod_doc.paragraphs:
                 new_para = master_doc.add_paragraph()
-                new_para.text = para.text
-                # Copia stile
                 if para.style:
                     try:
                         new_para.style = para.style.name
                     except:
                         pass
-                # Copia formattazione
+                
+                # Copia runs con formattazione
                 if para.runs:
                     for run in para.runs:
                         new_run = new_para.add_run(run.text)
@@ -371,11 +447,14 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
                         new_run.italic = run.italic
                         new_run.font.size = run.font.size
                         new_run.font.name = run.font.name
+                        if run.font.color and run.font.color.rgb:
+                            new_run.font.color.rgb = run.font.color.rgb
+            
             print(f"  ✓ Aggiunto {tipo}: {nome}")
         except Exception as e:
             print(f"  ✗ Errore con {nome}: {e}")
     
-    # 7. Salva in memoria (bytes)
+    # 8. Salva in memoria (bytes)
     from io import BytesIO
     buffer = BytesIO()
     master_doc.save(buffer)
