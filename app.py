@@ -84,14 +84,14 @@ with st.sidebar:
         
         /* Sidebar aperta (desktop) - REGOLA QUESTO VALORE */
         [data-testid="stSidebar"][aria-expanded="true"] {
-            width: 130px !important;
-            min-width: 130px !important;
-            max-width: 130px !important;
+            width: 150px !important;
+            min-width: 150px !important;
+            max-width: 150px !important;
         }
         
         /* Contenuto interno sidebar */
         [data-testid="stSidebar"][aria-expanded="true"] > div {
-            width: 120px !important;
+            width: 150px !important;
         }
         
         /* Rimuovi padding eccessivo */
@@ -497,6 +497,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
