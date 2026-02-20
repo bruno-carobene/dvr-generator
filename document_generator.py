@@ -176,66 +176,55 @@ def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
             p._element.addnext(table._element)
 
 def rimuovi_sommario_dinamico(doc):
-    """Rimuove il campo sommario (TOC) e il paragrafo 'Nessuna voce di sommario trovata'"""
-    paragrafi_da_rimuovere = []
-    
-    for i, p in enumerate(doc.paragraphs):
-        # Cerca campi TOC
+    """Rimuove completamente il campo sommario (TOC) dal documento"""
+    # Trova e rimuovi tutti i campi TOC
+    for p in doc.paragraphs[:]:
+        # Cerca campi TOC (hanno fldChar)
         if p._element.xpath('.//w:fldChar'):
-            paragrafi_da_rimuovere.append(i)
+            # Rimuovi questo paragrafo
+            p._element.getparent().remove(p._element)
             continue
         
-        # Rimuove "Nessuna voce di sommario trovata" o simili
-        if any(testo in p.text for testo in [
-            'Nessuna voce di sommario trovata',
-            'Aggiorna sommario',
-            'interruzione pagina',
+        # Rimuove anche "Nessuna voce di sommario trovata" o simili
+        if any(testo in p.text.upper() for testo in [
+            'NESSUNA VOCE DI SOMMARIO TROVATA',
+            'AGGIORNA SOMMARIO',
+            'INTERUZIONE PAGINA',
             'SOMMARIO'
         ]):
-            paragrafi_da_rimuovere.append(i)
-            continue
-    
-    # Rimuovi dal fondo per non cambiare gli indici
-    for i in reversed(paragrafi_da_rimuovere):
-        if i < len(doc.paragraphs):
-            p = doc.paragraphs[i]
             p._element.getparent().remove(p._element)
 
-def aggiungi_sommario_statico(doc):
-    """Aggiunge il sommario statico DOPO la prima pagina (senza forzare salto pagina extra)"""
+def aggiungi_sommario_statico_dopo_interruzione(doc):
+    """
+    Aggiunge il sommario statico DOPO l'interruzione pagina esistente.
+    Cerca l'interruzione pagina nel documento e inserisce il sommario subito dopo.
+    """
+    # Trova l'interruzione pagina (dovrebbe essere dopo la tabella in prima pagina)
+    insert_point = None
     
-    # Trova dove finisce la prima pagina (dopo il titolo principale)
-    target_para = None
     for i, p in enumerate(doc.paragraphs):
-        if 'VALUTAZIONE DEI RISCHI' in p.text.upper() or 'DOCUMENTO DI VALUTAZIONE' in p.text.upper():
-            # Cerca il paragrafo successivo che potrebbe essere un salto pagina o la fine
-            if i + 1 < len(doc.paragraphs):
-                next_p = doc.paragraphs[i + 1]
-                # Se c'è già un salto pagina, usiamo quello
-                if next_p._element.xpath('.//w:br[@w:type="page"]'):
-                    target_para = next_p
-                else:
-                    target_para = p
-            else:
-                target_para = p
+        # Cerca interruzione pagina
+        if p._element.xpath('.//w:br[@w:type="page"]'):
+            insert_point = p
             break
     
-    if target_para is None:
-        target_para = doc.paragraphs[0] if doc.paragraphs else None
+    # Se non troviamo interruzione pagina, la aggiungiamo alla fine della prima pagina
+    if insert_point is None:
+        # Aggiungi interruzione pagina alla fine
+        doc.add_paragraph().add_run().add_break()
+        insert_point = doc.paragraphs[-1]
     
-    if target_para is None:
-        return
-    
-    # Inserisci SOMMARIO come titolo
+    # Inserisci titolo SOMMARIO
     p_titolo = doc.add_paragraph()
-    target_para._element.addnext(p_titolo._element)
+    insert_point._element.addnext(p_titolo._element)
     run = p_titolo.add_run("SOMMARIO")
     run.bold = True
-    run.font.size = Pt(16)
-    p_titolo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run.font.size = Pt(14)
+    p_titolo.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    # Inserisci righe del sommario
-    sommario_righe = [
+    # Dati del sommario: (testo, livello_indentazione)
+    # livello 0 = principale, 1 = indentato, 2 = doppio indentato
+    sommario_items = [
         ("Introduzione", 0),
         ("Obiettivi del documento", 1),
         ("Chi ha partecipato alla redazione del documento", 1),
@@ -271,40 +260,31 @@ def aggiungi_sommario_statico(doc):
         ("Mansioni", 1),
     ]
     
+    # Inserisci righe
     ultimo_para = p_titolo
-    for testo, livello in sommario_righe:
-        if not testo:
-            # Riga vuota
-            p = doc.add_paragraph()
-        else:
-            p = doc.add_paragraph()
+    for testo, livello in sommario_items:
+        p = doc.add_paragraph()
+        ultimo_para._element.addnext(p._element)
+        
+        if testo:  # Se non è riga vuota
             run = p.add_run(testo)
             if livello == 0:
                 run.bold = True
                 run.font.size = Pt(11)
             elif livello == 1:
                 run.font.size = Pt(10)
+                p.paragraph_format.left_indent = Pt(18)
             else:  # livello 2
                 run.font.size = Pt(10)
                 p.paragraph_format.left_indent = Pt(36)
         
-        ultimo_para._element.addnext(p._element)
         ultimo_para = p
 
 def formatta_elenco_paragrafi(lista):
-    """
-    Formatta elenco con VERO a capo (paragrafo), non interruzione riga.
-    Ogni elemento è un paragrafo separato.
-    """
+    """Formatta elenco come lista di stringhe"""
     if not lista:
-        return ""
-    
-    # Formatta nomi
-    voci_pulite = [v.replace("_", " ").capitalize() for v in lista]
-    
-    # Unisci con carattere speciale che indica "nuovo paragrafo"
-    # Useremo chr(13) o semplicemente faremo gestire questo a chi chiama la funzione
-    return voci_pulite  # Restituisce lista, non stringa
+        return []
+    return [v.replace("_", " ").capitalize() for v in lista]
 
 def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
     """
@@ -315,55 +295,52 @@ def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
     
     for p in doc.paragraphs:
         if segnaposto in p.text:
-            # Trova il paragrafo padre
             parent = p._element.getparent()
-            idx = parent.index(p._element)
+            idx = list(parent).index(p._element)
             
-            # Rimuovi il placeholder ma mantieni il paragrafo per il primo elemento
-            p.text = p.text.replace(segnaposto, "")
+            # Rimuovi il placeholder
+            p.text = p.text.replace(segnaposto, lista_voci[0] if lista_voci else "")
             
-            # Inserisci ogni voce come nuovo paragrafo con bullet
-            for i, voce in enumerate(lista_voci):
-                if i == 0:
-                    # Primo elemento: usa il paragrafo esistente
-                    p.text = voce
-                    # Applica stile elenco puntato se disponibile
-                    try:
-                        p.style = 'List Bullet'
-                    except:
-                        pass
-                else:
-                    # Elementi successivi: nuovi paragrafi
-                    new_p = OxmlElement('w:p')
-                    parent.insert(idx + i, new_p)
-                    # Aggiungi testo
-                    r = OxmlElement('w:r')
-                    t = OxmlElement('w:t')
-                    t.text = voce
-                    r.append(t)
-                    new_p.append(r)
+            # Applica stile elenco puntato al primo
+            try:
+                p.style = 'List Bullet'
+            except:
+                pass
+            
+            # Aggiungi altri elementi come nuovi paragrafi con bullet
+            for i, voce in enumerate(lista_voci[1:], start=1):
+                new_p = doc.add_paragraph(voce)
+                try:
+                    new_p.style = 'List Bullet'
+                except:
+                    pass
+                parent.insert(idx + i, new_p._element)
             
             break
 
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
     Funzione principale che genera il documento DVR
+    STRUTTURA:
+    - Pagina 1: Copertina + tabella (dal template)
+    - Pagina 2: Sommario statico
+    - Pagine successive: Moduli allegati
     """
     # Prepara i dati
     data_di_oggi = datetime.now().strftime("%d/%m/%Y")
     azienda_data["DATA"] = data_di_oggi
     
-    # Formatta le liste (ora come liste, non stringhe)
+    # Formatta le liste
     lista_ambienti = formatta_elenco_paragrafi(ambienti)
     lista_mansioni = formatta_elenco_paragrafi(mansioni)
     lista_attrezzature = formatta_elenco_paragrafi(attrezzature)
     lista_chimici = formatta_elenco_paragrafi(agenti_chimici)
     
-    # Per compatibilità con segnaposto singolo, unisci con "a capo" (chr(13))
-    azienda_data["LISTA_AMBIENTI"] = chr(13).join(lista_ambienti) if lista_ambienti else ""
-    azienda_data["LISTA_MANSIONI"] = chr(13).join(lista_mansioni) if lista_mansioni else ""
-    azienda_data["LISTA_ATTREZZATURE"] = chr(13).join(lista_attrezzature) if lista_attrezzature else ""
-    azienda_data["LISTA_CHIMICI"] = chr(13).join(lista_chimici) if lista_chimici else ""
+    # Per segnaposto singolo (con a capo vero)
+    azienda_data["LISTA_AMBIENTI"] = "\n".join(lista_ambienti) if lista_ambienti else ""
+    azienda_data["LISTA_MANSIONI"] = "\n".join(lista_mansioni) if lista_mansioni else ""
+    azienda_data["LISTA_ATTREZZATURE"] = "\n".join(lista_attrezzature) if lista_attrezzature else ""
+    azienda_data["LISTA_CHIMICI"] = "\n".join(lista_chimici) if lista_chimici else ""
     
     # Percorso template
     template_path = os.path.join(templates_dir, 'Template_Base.docx')
@@ -374,37 +351,36 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 1. Carica template master
     master_doc = Document(template_path)
     
-    # 2. Rimuovi sommario dinamico esistente (COMPLETAMENTE)
+    # 2. Rimuovi eventuale sommario dinamico esistente (pulizia)
     rimuovi_sommario_dinamico(master_doc)
     
-    # 3. Compila segnaposti anagrafici (mantenendo formattazione)
+    # 3. Compila segnaposti anagrafici (copertina e tabella)
     compila_segnaposto(master_doc, azienda_data)
     
-    # 4. Inserisci elenchi puntati corretti (dopo aver compilato i segnaposto)
-    # Questo sovrascrive le liste se il template ha i segnaposto in stili elenco
+    # 4. Inserisci elenchi puntati corretti
     inserisci_elenco_puntato(master_doc, "{{LISTA_ATTREZZATURE}}", lista_attrezzature)
     inserisci_elenco_puntato(master_doc, "{{LISTA_CHIMICI}}", lista_chimici)
     
     # 5. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
-    # 6. Aggiungi sommario statico (DOPO la compilazione, prima dei moduli)
-    aggiungi_sommario_statico(master_doc)
+    # 6. Aggiungi sommario statico a pagina 2 (dopo l'interruzione pagina esistente)
+    aggiungi_sommario_statico_dopo_interruzione(master_doc)
     
-    # 7. Assembla moduli
+    # 7. Assembla moduli (dopo il sommario)
     print("Assemblaggio moduli in corso...")
     
-    # Trova dove inserire i moduli (dopo "Allegati" o alla fine)
+    # Trova dove finisce il sommario (cerca "Allegati" o metti alla fine)
     insert_point = None
-    for i, p in enumerate(master_doc.paragraphs):
+    for p in master_doc.paragraphs:
         if 'ALLEGATI' in p.text.upper():
             insert_point = p
             break
     
     if insert_point is None:
-        insert_point = master_doc.paragraphs[-1] if master_doc.paragraphs else None
+        insert_point = master_doc.paragraphs[-1]
     
-    # Aggiungi moduli
+    # Raccogli moduli
     moduli_da_aggiungere = []
     for ambiente in ambienti:
         mod_path = os.path.join(templates_dir, f"{ambiente}.docx")
@@ -427,12 +403,13 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
             mod_doc = Document(mod_path)
             
             # Aggiungi salto pagina
-            if insert_point:
-                master_doc.add_page_break()
+            master_doc.add_page_break()
             
             # Copia contenuto
             for para in mod_doc.paragraphs:
                 new_para = master_doc.add_paragraph()
+                
+                # Copia stile
                 if para.style:
                     try:
                         new_para.style = para.style.name
