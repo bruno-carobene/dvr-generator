@@ -68,7 +68,7 @@ with col2:
 
 st.markdown("---")
 
-st.title("📋 Generatore Documento di Valutazione Rischi (DVR)")
+st.title("Generatore Documento di Valutazione Rischi (DVR). Un progetto Easywork Italia S,r.l.")
 st.markdown("Compila il modulo per generare il documento di valutazione rischi personalizzato.")
 
 # Pulsante logout (opzionale, in sidebar)
@@ -469,3 +469,4 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
