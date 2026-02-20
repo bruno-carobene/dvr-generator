@@ -69,7 +69,7 @@ with col2:
 # Titolo centrato
 st.markdown("""
     <h1 style='text-align: center;'>
-        📋 Generatore Documento di Valutazione Rischi (DVR).<br>
+        Generatore Documento di Valutazione Rischi (DVR)<br>
         Un progetto Easywork Italia S.r.l.
     </h1>
 """, unsafe_allow_html=True)
@@ -506,6 +506,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
