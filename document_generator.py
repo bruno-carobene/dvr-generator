@@ -1,13 +1,21 @@
 # document_generator.py
 from datetime import datetime
 from docx import Document
-from docxcompose.composer import Composer
-from docx.shared import RGBColor
-from docx.oxml.ns import qn
+from docx.shared import RGBColor, Pt
+from docx.oxml.ns import qn, nsmap
 from docx.oxml import parse_xml
+from copy import deepcopy
 import os
+import re
 
-# Database agenti chimici (dal tuo codice)
+# Namespace per i campi Word
+NAMESPACES = {
+    'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
+    'w15': 'http://schemas.microsoft.com/office/word/2012/wordml'
+}
+
+# Database agenti chimici
 db_chimico = {
     "Acidi per laboratori didattici": ["2-Medio", "H314"], 
     "Acido cloridrico": ["2-Medio", "H315 - H335"],
@@ -50,7 +58,7 @@ db_chimico = {
     "Gasolio": ["1-Basso", "H226, H304, H332, H351, H411"], 
     "Glicole etilenico": ["1-Basso", "H302"],
     "Grasso lubrificante": ["1-Basso", "-"], 
-    "Inchiostri per offset": ["2-Medio", "H315, H318, H412"],
+    "Inchiostri per offset": ["2-Medio", "H315, H318, "],
     "Indurente vernici veicoli": ["2-Medio", "H226, H332, H317, H360, H412"], 
     "Legante basi verniciatura": ["2-Medio", "-"],
     "Loctite-401": ["1-Basso", "H315, H319, H335"], 
@@ -80,19 +88,67 @@ db_chimico = {
 }
 
 def imposta_colore_cella(cella, colore_hex):
-    """Versione corretta per evitare XMLSyntaxError"""
+    """Imposta colore di sfondo cella"""
     xml_string = f'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="{colore_hex}"/>'
     shading_elm = parse_xml(xml_string)
     cella._tc.get_or_add_tcPr().append(shading_elm)
 
+def sostituisci_mantieni_formato(paragrafo, placeholder, valore):
+    """
+    Sostituisce il placeholder mantenendo la formattazione del primo run
+    """
+    if placeholder not in paragrafo.text:
+        return False
+    
+    # Trova il run con il placeholder
+    for run in paragrafo.runs:
+        if placeholder in run.text:
+            # Salva la formattazione
+            font_name = run.font.name
+            font_size = run.font.size
+            bold = run.font.bold
+            italic = run.font.italic
+            color = run.font.color.rgb if run.font.color else None
+            
+            # Sostituisci testo
+            run.text = run.text.replace(placeholder, str(valore))
+            
+            # Ripristina formattazione
+            if font_name:
+                run.font.name = font_name
+            if font_size:
+                run.font.size = font_size
+            if bold:
+                run.font.bold = bold
+            if italic:
+                run.font.italic = italic
+            if color:
+                run.font.color.rgb = color
+            
+            return True
+    
+    # Se il placeholder è spezzato su più run, ricostruisci
+    full_text = ''.join([r.text for r in paragrafo.runs])
+    if placeholder in full_text:
+        # Cancella tutti i run tranne il primo
+        first_run = paragrafo.runs[0]
+        for run in paragrafo.runs[1:]:
+            run.text = ""
+        
+        # Sostituisci nel primo run mantenendo la sua formattazione
+        first_run.text = full_text.replace(placeholder, str(valore))
+        return True
+    
+    return False
+
 def compila_segnaposto(doc, dati):
-    """Sostituisce tutti i segnaposto {{VARIABILE}} nel documento"""
+    """Sostituisce segnaposto mantenendo la formattazione"""
     # Sostituzione nei paragrafi
     for p in doc.paragraphs:
         for key, value in dati.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                p.text = p.text.replace(placeholder, str(value))
+                sostituisci_mantieni_formato(p, placeholder, str(value))
     
     # Sostituzione nelle tabelle
     for table in doc.tables:
@@ -101,9 +157,11 @@ def compila_segnaposto(doc, dati):
                 for key, value in dati.items():
                     placeholder = f"{{{{{key}}}}}"
                     if placeholder in cell.text:
-                        cell.text = cell.text.replace(placeholder, str(value))
+                        for p in cell.paragraphs:
+                            sostituisci_mantieni_formato(p, placeholder, str(value))
 
 def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
+    """Inserisce tabella agenti chimici"""
     for p in doc.paragraphs:
         if segnaposto in p.text:
             p.text = p.text.replace(segnaposto, "")
@@ -128,11 +186,11 @@ def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
 
                     # Logica Colori
                     if "Alto" in rischio: 
-                        colore = "FF9999"    # Rosso
+                        colore = "FF9999"
                     elif "Medio" in rischio: 
-                        colore = "FFFFCC"    # Giallo
+                        colore = "FFFFCC"
                     elif "Basso" in rischio: 
-                        colore = "CCFFCC"    # Verde
+                        colore = "CCFFCC"
                     else: 
                         colore = "FFFFFF"
 
@@ -146,6 +204,31 @@ def formatta_per_word(lista):
         return "Nessuno"
     voci_pulite = [v.replace("_", " ").capitalize() for v in lista]
     return "\n".join([f"- {v}" for v in voci_pulite])
+
+def copia_elementi(src_doc, dest_doc):
+    """Copia tutti gli elementi da un documento all'altro"""
+    for element in src_doc.element.body:
+        dest_doc.element.body.append(deepcopy(element))
+
+def aggiorna_campi_sommario(doc):
+    """
+    Aggiorna i campi del sommario (TOC) impostandoli come 'dirty' 
+    per forzare l'aggiornamento all'apertura in Word
+    """
+    # Trova tutti i campi nel documento
+    for para in doc.paragraphs:
+        for run in para.runs:
+            # Cerca i campi TOC (sommario)
+            if run._element.xpath('.//w:fldChar'):
+                # Imposta il campo come da aggiornare
+                fldChars = run._element.findall('.//w:fldChar', NAMESPACES)
+                for fldChar in fldChars:
+                    if fldChar.get(qn('w:fldCharType')) == 'separate':
+                        # Trova il campo padre e imposta dirty
+                        fldData = run._element.find('.//w:instrText', NAMESPACES)
+                        if fldData is not None and 'TOC' in (fldData.text or ''):
+                            # Imposta il flag dirty
+                            fldChar.set(qn('w:dirty'), 'true')
 
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
@@ -167,43 +250,65 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template non trovato: {template_path}")
     
-    # 1. Carica template
+    # 1. Carica template master
     master_doc = Document(template_path)
     
-    # 2. Compila segnaposti anagrafici
+    # 2. Compila segnaposti anagrafici (mantenendo formattazione)
     compila_segnaposto(master_doc, azienda_data)
     
     # 3. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
     # 4. Assembla moduli
-    composer = Composer(master_doc)
+    print("Assemblaggio moduli in corso...")
     
     # Aggiungi moduli ambienti
     for ambiente in ambienti:
         mod_path = os.path.join(templates_dir, f"{ambiente}.docx")
         if os.path.exists(mod_path):
-            doc = Document(mod_path)
-            composer.append(doc)
+            try:
+                mod_doc = Document(mod_path)
+                master_doc.add_page_break()
+                copia_elementi(mod_doc, master_doc)
+                print(f"  ✓ Aggiunto: {ambiente}")
+            except Exception as e:
+                print(f"  ✗ Errore con {ambiente}: {e}")
     
     # Aggiungi moduli attrezzature  
     for att in attrezzature:
         mod_path = os.path.join(templates_dir, f"{att}.docx")
         if os.path.exists(mod_path):
-            doc = Document(mod_path)
-            composer.append(doc)
+            try:
+                mod_doc = Document(mod_path)
+                master_doc.add_page_break()
+                copia_elementi(mod_doc, master_doc)
+                print(f"  ✓ Aggiunto: {att}")
+            except Exception as e:
+                print(f"  ✗ Errore con {att}: {e}")
     
     # Aggiungi moduli mansioni
     for mans in mansioni:
         mod_path = os.path.join(templates_dir, f"{mans}.docx")
         if os.path.exists(mod_path):
-            doc = Document(mod_path)
-            composer.append(doc)
+            try:
+                mod_doc = Document(mod_path)
+                master_doc.add_page_break()
+                copia_elementi(mod_doc, master_doc)
+                print(f"  ✓ Aggiunto: {mans}")
+            except Exception as e:
+                print(f"  ✗ Errore con {mans}: {e}")
     
-    # 5. Salva in memoria (bytes)
+    # 5. Aggiorna campi sommario
+    try:
+        aggiorna_campi_sommario(master_doc)
+        print("  ✓ Campi sommario aggiornati")
+    except Exception as e:
+        print(f"  ⚠️  Avviso: impossibile aggiornare sommario automaticamente: {e}")
+    
+    # 6. Salva in memoria (bytes)
     from io import BytesIO
     buffer = BytesIO()
-    composer.save(buffer)
+    master_doc.save(buffer)
     buffer.seek(0)
     
     return buffer
