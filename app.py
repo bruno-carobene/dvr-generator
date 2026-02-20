@@ -10,9 +10,17 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📋 Generatore Documento di Valutazione Rischi (DVR) di Easywork Italia S.r.l.")
-st.markdown("Compila il modulo per generare il documento di valutazione rischi personalizzato.")
+# === LOGO EASYWORK ===
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo-easywork.jpg", 
+             use_column_width=True)
 
+st.markdown("---")
+
+# Titolo centrato
+st.title("📋 Generatore Documento di Valutazione Rischi (DVR) con metodo Easywork Italia S.r.l.")
+st.markdown("Compila il modulo per generare il documento di valutazione rischi personalizzato.")
 # Inizializza session state per i dati
 if 'azienda_data' not in st.session_state:
     st.session_state.azienda_data = {}
@@ -396,4 +404,5 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
 
                 st.exception(e)
+
 
