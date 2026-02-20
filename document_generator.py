@@ -4,9 +4,17 @@ from docx import Document
 from docx.shared import RGBColor, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.oxml import parse_xml, OxmlElement
-from copy import deepcopy
+from docx.oxml import parse_xml
 import os
+import sys
+
+# Installa docxcompose se non presente (per Streamlit Cloud)
+try:
+    from docxcompose.composer import Composer
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "docxcompose==1.1.2", "--quiet"])
+    from docxcompose.composer import Composer
 
 # Database agenti chimici
 db_chimico = {
@@ -35,7 +43,7 @@ db_chimico = {
     "Detergente disincrostante forni": ["2-Medio", "H315, H319"], 
     "Detergente igienizzante clima": ["1-Basso", "H225, H319"],
     "Detergente stoviglie a mano": ["3-Alto", "H302, H315, H318"], 
-    "Detergente lavastoviglie": ["3-Alto", "H319, H315"],
+    "Detergente lavastoviglie": ["3-Alto", "H319, "],
     "Detergente lucidatura carrozzerie": ["1-Basso", "H225, H319, H336"], 
     "Detergente per pavimenti": ["1-Basso", "H315, H318"],
     "Detergente per superfici diluito": ["1-Basso", "-"], 
@@ -87,7 +95,7 @@ def imposta_colore_cella(cella, colore_hex):
     cella._tc.get_or_add_tcPr().append(shading_elm)
 
 def sostituisci_mantieni_formato(paragrafo, placeholder, valore):
-    """Sostituisce il placeholder mantenendo la formattazione del primo run"""
+    """Sostituisce il placeholder mantenendo la formattazione"""
     if placeholder not in paragrafo.text:
         return False
     
@@ -177,7 +185,7 @@ def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
             p._element.addnext(table._element)
 
 def rimuovi_sommario_dinamico(doc):
-    """Rimuove completamente il campo sommario (TOC) dal documento"""
+    """Rimuove il campo sommario (TOC) dal documento"""
     for p in doc.paragraphs[:]:
         if p._element.xpath('.//w:fldChar'):
             p._element.getparent().remove(p._element)
@@ -186,31 +194,40 @@ def rimuovi_sommario_dinamico(doc):
         if any(testo in p.text.upper() for testo in [
             'NESSUNA VOCE DI SOMMARIO TROVATA',
             'AGGIORNA SOMMARIO',
-            'INTERUZIONE PAGINA',
             'SOMMARIO'
         ]):
             p._element.getparent().remove(p._element)
 
-def aggiungi_sommario_statico_dopo_interruzione(doc):
-    """Aggiunge il sommario statico DOPO l'interruzione pagina esistente"""
+def aggiungi_sommario_statico(doc):
+    """Aggiunge il sommario statico dopo la prima pagina"""
+    # Trova l'interruzione pagina
     insert_point = None
-    
     for i, p in enumerate(doc.paragraphs):
         if p._element.xpath('.//w:br[@w:type="page"]'):
             insert_point = p
             break
     
     if insert_point is None:
-        doc.add_paragraph().add_run().add_break()
-        insert_point = doc.paragraphs[-1]
+        # Se non c'è, aggiungiamo noi l'interruzione dopo il primo contenuto
+        # Troviamo un punto appropriato (dopo la tabella)
+        for p in reversed(doc.paragraphs):
+            if p.text.strip():
+                insert_point = p
+                break
+        if insert_point:
+            insert_point.add_run().add_break()
     
+    if insert_point is None:
+        return
+    
+    # Inserisci titolo SOMMARIO
     p_titolo = doc.add_paragraph()
     insert_point._element.addnext(p_titolo._element)
     run = p_titolo.add_run("SOMMARIO")
     run.bold = True
     run.font.size = Pt(14)
-    p_titolo.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
+    # Righe sommario
     sommario_items = [
         ("Introduzione", 0),
         ("Obiettivi del documento", 1),
@@ -299,27 +316,14 @@ def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
             
             break
 
-def copia_contenuto_documento(src_doc, dest_doc):
-    """
-    Copia TUTTO il contenuto da un documento all'altro:
-    - Paragrafi
-    - Tabelle
-    - Mantenendo formattazione
-    """
-    for element in src_doc.element.body:
-        # Copia l'elemento
-        new_element = deepcopy(element)
-        dest_doc.element.body.append(new_element)
-
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
-    Funzione principale che genera il documento DVR
+    Funzione principale che genera il documento DVR usando docxcompose
     """
-    # Prepara i dati
+    # Prepara dati
     data_di_oggi = datetime.now().strftime("%d/%m/%Y")
     azienda_data["DATA"] = data_di_oggi
     
-    # Formatta le liste
     lista_ambienti = formatta_elenco_paragrafi(ambienti)
     lista_mansioni = formatta_elenco_paragrafi(mansioni)
     lista_attrezzature = formatta_elenco_paragrafi(attrezzature)
@@ -330,13 +334,12 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     azienda_data["LISTA_ATTREZZATURE"] = "\n".join(lista_attrezzature) if lista_attrezzature else ""
     azienda_data["LISTA_CHIMICI"] = "\n".join(lista_chimici) if lista_chimici else ""
     
-    # Percorso template
     template_path = os.path.join(templates_dir, 'Template_Base.docx')
     
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template non trovato: {template_path}")
     
-    # 1. Carica template master
+    # 1. Carica template
     master_doc = Document(template_path)
     
     # 2. Rimuovi sommario dinamico
@@ -345,30 +348,21 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 3. Compila segnaposti
     compila_segnaposto(master_doc, azienda_data)
     
-    # 4. Inserisci elenchi puntati
+    # 4. Inserisci elenchi
     inserisci_elenco_puntato(master_doc, "{{LISTA_ATTREZZATURE}}", lista_attrezzature)
     inserisci_elenco_puntato(master_doc, "{{LISTA_CHIMICI}}", lista_chimici)
     
     # 5. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
-    # 6. Aggiungi sommario statico a pagina 2
-    aggiungi_sommario_statico_dopo_interruzione(master_doc)
+    # 6. Aggiungi sommario statico
+    aggiungi_sommario_statico(master_doc)
     
-    # 7. Assembla moduli (con TUTTO il contenuto incluso tabelle)
+    # 7. Assembla moduli con Composer (SENZA salto pagina extra tra moduli)
     print("Assemblaggio moduli in corso...")
+    composer = Composer(master_doc)
     
-    # Trova punto di inserimento (dopo "Allegati")
-    insert_point = None
-    for p in master_doc.paragraphs:
-        if 'ALLEGATI' in p.text.upper():
-            insert_point = p
-            break
-    
-    if insert_point is None:
-        insert_point = master_doc.paragraphs[-1]
-    
-    # Raccogli moduli
+    # Raccogli tutti i moduli
     moduli_da_aggiungere = []
     for ambiente in ambienti:
         mod_path = os.path.join(templates_dir, f"{ambiente}.docx")
@@ -385,17 +379,11 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
         if os.path.exists(mod_path):
             moduli_da_aggiungere.append(("mansione", mans, mod_path))
     
-    # Inserisci moduli con copia completa (paragrafi + tabelle)
+    # Aggiungi moduli (Composer gestisce automaticamente la paginazione)
     for tipo, nome, mod_path in moduli_da_aggiungere:
         try:
-            mod_doc = Document(mod_path)
-            
-            # Aggiungi salto pagina
-            master_doc.add_page_break()
-            
-            # Copia TUTTO il contenuto del documento (paragrafi e tabelle)
-            copia_contenuto_documento(mod_doc, master_doc)
-            
+            doc = Document(mod_path)
+            composer.append(doc)  # NON aggiungiamo salto pagina manualmente
             print(f"  ✓ Aggiunto {tipo}: {nome}")
         except Exception as e:
             print(f"  ✗ Errore con {nome}: {e}")
@@ -403,7 +391,7 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 8. Salva
     from io import BytesIO
     buffer = BytesIO()
-    master_doc.save(buffer)
+    composer.save(buffer)
     buffer.seek(0)
     
     return buffer
