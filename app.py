@@ -73,14 +73,25 @@ st.markdown("Compila il modulo per generare il documento di valutazione rischi p
 
 # Pulsante logout (opzionale, in sidebar)
 with st.sidebar:
-    # RESTRINGI sidebar
+    # RESTRINGI sidebar al minimo
     st.markdown("""
         <style>
         [data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
-            width: 100px;  /* Era 350px, ora più stretta */
+            width: 120px;  /* Ridotto da 180px a 120px */
         }
         [data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
-            width: 100px;
+            width: 120px;
+        }
+        /* Rimuovi padding interno per avvicinare al bordo */
+        [data-testid="stSidebar"] > div:first-child > div:first-child {
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+        /* Riduci larghezza pulsante */
+        .stButton > button {
+            width: 100%;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -481,6 +492,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
