@@ -13,7 +13,7 @@ st.set_page_config(
 # === LOGO EASYWORK ===
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo-easywork.jpg", 
+    st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo_easywork.jpg", 
              use_column_width=True)
 
 st.markdown("---")
@@ -404,5 +404,6 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
 
                 st.exception(e)
+
 
 
