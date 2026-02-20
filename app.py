@@ -56,9 +56,9 @@ with col4:
 # Descrizione attività
 st.subheader("📝 Descrizione Attività")
 attivita_desc = st.text_area("Descrivi brevemente il settore di attività", key="attivita")
-locali = st.text_area("Struttura dei locali ({{locali}})", key="locali")
-terzi = st.text_input("Attività affidate a terzi ({{terzi}})", key="terzi")
-terzi_svolte = st.text_input("Attività svolte presso terzi ({{terzi_svolte}})", key="terzi_svolte")
+locali = st.text_area("Struttura dei locali", key="locali")
+terzi = st.text_input("Attività affidate a terzi", key="terzi")
+terzi_svolte = st.text_input("Attività svolte presso terzi", key="terzi_svolte")
 
 # === SEZIONE 2: AMBIENTI ===
 st.header("🏭 Ambienti Aziendali")
@@ -394,4 +394,5 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                     
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
+
                 st.exception(e)
