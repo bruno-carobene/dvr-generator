@@ -5,6 +5,7 @@ from docx.shared import RGBColor, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml, OxmlElement
+from copy import deepcopy
 import os
 
 # Database agenti chimici
@@ -177,15 +178,11 @@ def inserisci_tabella_chimica(doc, segnaposto, lista_scelti, db):
 
 def rimuovi_sommario_dinamico(doc):
     """Rimuove completamente il campo sommario (TOC) dal documento"""
-    # Trova e rimuovi tutti i campi TOC
     for p in doc.paragraphs[:]:
-        # Cerca campi TOC (hanno fldChar)
         if p._element.xpath('.//w:fldChar'):
-            # Rimuovi questo paragrafo
             p._element.getparent().remove(p._element)
             continue
         
-        # Rimuove anche "Nessuna voce di sommario trovata" o simili
         if any(testo in p.text.upper() for testo in [
             'NESSUNA VOCE DI SOMMARIO TROVATA',
             'AGGIORNA SOMMARIO',
@@ -195,26 +192,18 @@ def rimuovi_sommario_dinamico(doc):
             p._element.getparent().remove(p._element)
 
 def aggiungi_sommario_statico_dopo_interruzione(doc):
-    """
-    Aggiunge il sommario statico DOPO l'interruzione pagina esistente.
-    Cerca l'interruzione pagina nel documento e inserisce il sommario subito dopo.
-    """
-    # Trova l'interruzione pagina (dovrebbe essere dopo la tabella in prima pagina)
+    """Aggiunge il sommario statico DOPO l'interruzione pagina esistente"""
     insert_point = None
     
     for i, p in enumerate(doc.paragraphs):
-        # Cerca interruzione pagina
         if p._element.xpath('.//w:br[@w:type="page"]'):
             insert_point = p
             break
     
-    # Se non troviamo interruzione pagina, la aggiungiamo alla fine della prima pagina
     if insert_point is None:
-        # Aggiungi interruzione pagina alla fine
         doc.add_paragraph().add_run().add_break()
         insert_point = doc.paragraphs[-1]
     
-    # Inserisci titolo SOMMARIO
     p_titolo = doc.add_paragraph()
     insert_point._element.addnext(p_titolo._element)
     run = p_titolo.add_run("SOMMARIO")
@@ -222,8 +211,6 @@ def aggiungi_sommario_statico_dopo_interruzione(doc):
     run.font.size = Pt(14)
     p_titolo.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    # Dati del sommario: (testo, livello_indentazione)
-    # livello 0 = principale, 1 = indentato, 2 = doppio indentato
     sommario_items = [
         ("Introduzione", 0),
         ("Obiettivi del documento", 1),
@@ -242,7 +229,7 @@ def aggiungi_sommario_statico_dopo_interruzione(doc):
         ("Quantificazione dei rischi specifici", 1),
         ("Prescrizioni legali", 0),
         ("Gestione del documento", 0),
-        ("", 0),  # Riga vuota
+        ("", 0),
         ("L'azienda", 0),
         ("Anagrafica aziendale", 1),
         ("Il Sistema di sicurezza aziendale", 1),
@@ -253,20 +240,19 @@ def aggiungi_sommario_statico_dopo_interruzione(doc):
         ("Attrezzature e agenti chimici impiegati", 0),
         ("Elenco delle attrezzature impiegate", 1),
         ("Agenti chimici", 1),
-        ("", 0),  # Riga vuota
+        ("", 0),
         ("Allegati", 0),
         ("Ambienti di lavoro", 1),
         ("Attrezzature", 1),
         ("Mansioni", 1),
     ]
     
-    # Inserisci righe
     ultimo_para = p_titolo
     for testo, livello in sommario_items:
         p = doc.add_paragraph()
         ultimo_para._element.addnext(p._element)
         
-        if testo:  # Se non è riga vuota
+        if testo:
             run = p.add_run(testo)
             if livello == 0:
                 run.bold = True
@@ -274,7 +260,7 @@ def aggiungi_sommario_statico_dopo_interruzione(doc):
             elif livello == 1:
                 run.font.size = Pt(10)
                 p.paragraph_format.left_indent = Pt(18)
-            else:  # livello 2
+            else:
                 run.font.size = Pt(10)
                 p.paragraph_format.left_indent = Pt(36)
         
@@ -287,9 +273,7 @@ def formatta_elenco_paragrafi(lista):
     return [v.replace("_", " ").capitalize() for v in lista]
 
 def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
-    """
-    Sostituisce il segnaposto con un elenco puntato dove ogni voce è un paragrafo separato
-    """
+    """Sostituisce il segnaposto con un elenco puntato"""
     if not lista_voci:
         return
     
@@ -298,16 +282,13 @@ def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
             parent = p._element.getparent()
             idx = list(parent).index(p._element)
             
-            # Rimuovi il placeholder
             p.text = p.text.replace(segnaposto, lista_voci[0] if lista_voci else "")
             
-            # Applica stile elenco puntato al primo
             try:
                 p.style = 'List Bullet'
             except:
                 pass
             
-            # Aggiungi altri elementi come nuovi paragrafi con bullet
             for i, voce in enumerate(lista_voci[1:], start=1):
                 new_p = doc.add_paragraph(voce)
                 try:
@@ -318,13 +299,21 @@ def inserisci_elenco_puntato(doc, segnaposto, lista_voci):
             
             break
 
+def copia_contenuto_documento(src_doc, dest_doc):
+    """
+    Copia TUTTO il contenuto da un documento all'altro:
+    - Paragrafi
+    - Tabelle
+    - Mantenendo formattazione
+    """
+    for element in src_doc.element.body:
+        # Copia l'elemento
+        new_element = deepcopy(element)
+        dest_doc.element.body.append(new_element)
+
 def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, templates_dir):
     """
     Funzione principale che genera il documento DVR
-    STRUTTURA:
-    - Pagina 1: Copertina + tabella (dal template)
-    - Pagina 2: Sommario statico
-    - Pagine successive: Moduli allegati
     """
     # Prepara i dati
     data_di_oggi = datetime.now().strftime("%d/%m/%Y")
@@ -336,7 +325,6 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     lista_attrezzature = formatta_elenco_paragrafi(attrezzature)
     lista_chimici = formatta_elenco_paragrafi(agenti_chimici)
     
-    # Per segnaposto singolo (con a capo vero)
     azienda_data["LISTA_AMBIENTI"] = "\n".join(lista_ambienti) if lista_ambienti else ""
     azienda_data["LISTA_MANSIONI"] = "\n".join(lista_mansioni) if lista_mansioni else ""
     azienda_data["LISTA_ATTREZZATURE"] = "\n".join(lista_attrezzature) if lista_attrezzature else ""
@@ -351,26 +339,26 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
     # 1. Carica template master
     master_doc = Document(template_path)
     
-    # 2. Rimuovi eventuale sommario dinamico esistente (pulizia)
+    # 2. Rimuovi sommario dinamico
     rimuovi_sommario_dinamico(master_doc)
     
-    # 3. Compila segnaposti anagrafici (copertina e tabella)
+    # 3. Compila segnaposti
     compila_segnaposto(master_doc, azienda_data)
     
-    # 4. Inserisci elenchi puntati corretti
+    # 4. Inserisci elenchi puntati
     inserisci_elenco_puntato(master_doc, "{{LISTA_ATTREZZATURE}}", lista_attrezzature)
     inserisci_elenco_puntato(master_doc, "{{LISTA_CHIMICI}}", lista_chimici)
     
     # 5. Inserisci tabella chimica
     inserisci_tabella_chimica(master_doc, "{{TABELLA_CHIMICA}}", agenti_chimici, db_chimico)
     
-    # 6. Aggiungi sommario statico a pagina 2 (dopo l'interruzione pagina esistente)
+    # 6. Aggiungi sommario statico a pagina 2
     aggiungi_sommario_statico_dopo_interruzione(master_doc)
     
-    # 7. Assembla moduli (dopo il sommario)
+    # 7. Assembla moduli (con TUTTO il contenuto incluso tabelle)
     print("Assemblaggio moduli in corso...")
     
-    # Trova dove finisce il sommario (cerca "Allegati" o metti alla fine)
+    # Trova punto di inserimento (dopo "Allegati")
     insert_point = None
     for p in master_doc.paragraphs:
         if 'ALLEGATI' in p.text.upper():
@@ -397,7 +385,7 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
         if os.path.exists(mod_path):
             moduli_da_aggiungere.append(("mansione", mans, mod_path))
     
-    # Inserisci moduli
+    # Inserisci moduli con copia completa (paragrafi + tabelle)
     for tipo, nome, mod_path in moduli_da_aggiungere:
         try:
             mod_doc = Document(mod_path)
@@ -405,33 +393,14 @@ def genera_dvr(azienda_data, ambienti, attrezzature, mansioni, agenti_chimici, t
             # Aggiungi salto pagina
             master_doc.add_page_break()
             
-            # Copia contenuto
-            for para in mod_doc.paragraphs:
-                new_para = master_doc.add_paragraph()
-                
-                # Copia stile
-                if para.style:
-                    try:
-                        new_para.style = para.style.name
-                    except:
-                        pass
-                
-                # Copia runs con formattazione
-                if para.runs:
-                    for run in para.runs:
-                        new_run = new_para.add_run(run.text)
-                        new_run.bold = run.bold
-                        new_run.italic = run.italic
-                        new_run.font.size = run.font.size
-                        new_run.font.name = run.font.name
-                        if run.font.color and run.font.color.rgb:
-                            new_run.font.color.rgb = run.font.color.rgb
+            # Copia TUTTO il contenuto del documento (paragrafi e tabelle)
+            copia_contenuto_documento(mod_doc, master_doc)
             
             print(f"  ✓ Aggiunto {tipo}: {nome}")
         except Exception as e:
             print(f"  ✗ Errore con {nome}: {e}")
     
-    # 8. Salva in memoria (bytes)
+    # 8. Salva
     from io import BytesIO
     buffer = BytesIO()
     master_doc.save(buffer)
