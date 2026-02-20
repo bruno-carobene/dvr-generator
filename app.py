@@ -1,26 +1,83 @@
 import streamlit as st
-import os
 from document_generator import genera_dvr
 from datetime import datetime
+import os
 
-# Configurazione pagina
+# === CONFIGURAZIONE PASSWORD ===
+PASSWORD_CORRETTA = "easyworkdvr26"  # Cambia con la password che vuoi
+
+# === FUNZIONE LOGIN ===
+def check_password():
+    """Verifica password e gestisce login"""
+    
+    # Inizializza stato sessione
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+    
+    # Se già loggato, mostra app
+    if st.session_state.password_correct:
+        return True
+    
+    # Mostra schermata login
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("## 🔐 Accesso Riservato")
+        st.markdown("---")
+        
+        # Logo Easywork
+        st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo-easywork.png", 
+                 use_column_width=True)
+        
+        st.markdown("---")
+        st.markdown("### Generatore DVR")
+        st.markdown("Inserisci la password per accedere all'applicazione")
+        
+        password = st.text_input("Password", type="password", key="password_input")
+        
+        if st.button("Accedi", use_container_width=True):
+            if password == PASSWORD_CORRETTA:
+                st.session_state.password_correct = True
+                st.success("✅ Accesso consentito!")
+                st.rerun()
+            else:
+                st.error("❌ Password errata. Riprova.")
+        
+        # Footer login
+        st.markdown("---")
+        st.caption("© Easywork - Tutti i diritti riservati")
+    
+    return False
+
+# === VERIFICA ACCESSO ===
+if not check_password():
+    st.stop()  # Blocca esecuzione se non loggato
+
+# === INIZIO APP (dopo login) ===
 st.set_page_config(
     page_title="Generatore DVR",
     page_icon="📋",
     layout="wide"
 )
 
-# === LOGO EASYWORK ===
-col1, col2, col3 = st.columns([1, 2, 1])
+# Logo in header (più piccolo)
+col1, col2, col3 = st.columns([1, 3, 1])
 with col2:
-    st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo_easywork.jpg", 
-             use_column_width=True)
+    st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo-easywork.png", 
+             width=200)
 
 st.markdown("---")
 
-# Titolo centrato
-st.title("📋 Generatore Documento di Valutazione Rischi (DVR) con metodo Easywork Italia S.r.l.")
+st.title("📋 Generatore Documento di Valutazione Rischi (DVR)")
 st.markdown("Compila il modulo per generare il documento di valutazione rischi personalizzato.")
+
+# Pulsante logout (opzionale, in sidebar)
+with st.sidebar:
+    if st.button("🚪 Logout"):
+        st.session_state.password_correct = False
+        st.rerun()
+    st.markdown("---")
+
 # Inizializza session state per i dati
 if 'azienda_data' not in st.session_state:
     st.session_state.azienda_data = {}
@@ -369,7 +426,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             
             try:
                 # Genera documento
-                templates_dir = "templates"  # Cartella locale
+                templates_dir = "templates"
                 doc_buffer = genera_dvr(
                     azienda_data, 
                     ambienti, 
@@ -393,6 +450,15 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                     use_container_width=True
                 )
                 
+                # Istruzioni sommario
+                st.info("""
+                📋 **Aggiornare il sommario:**  
+                Dopo aver aperto il documento in Word:
+                1. Seleziona tutto (**Ctrl+A**)
+                2. Premi **F9** (o clicca sul sommario → tasto destro → "Aggiorna campo")
+                3. Scegli "Aggiorna intero sommario"
+                """)
+                
                 # Riepilogo
                 with st.expander("📋 Riepilogo selezioni"):
                     st.write(f"**Ambienti:** {len(ambienti)} selezionati")
@@ -402,8 +468,4 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
                     
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
-
                 st.exception(e)
-
-
-
