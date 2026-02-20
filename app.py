@@ -61,10 +61,10 @@ st.set_page_config(
 )
 
 # Logo in header (più piccolo)
-col1, col2, col3 = st.columns([1, 3, 1])
+col1, col2, col3 = st.columns([1, 4, 1])
 with col2:
     st.image("https://raw.githubusercontent.com/bruno-carobene/dvr-generator/main/assets/logo-easywork.png", 
-             width=200)
+             width=400)
 
 st.markdown("---")
 
@@ -478,6 +478,7 @@ if st.button("Genera DVR", type="primary", use_container_width=True):
             except Exception as e:
                 st.error(f"❌ Errore durante la generazione: {str(e)}")
                 st.exception(e)
+
 
 
 
